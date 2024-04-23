@@ -1,0 +1,116 @@
+---
+version: "3.8"
+
+services:
+  reverse-proxy:
+    # The official v2 Traefik docker image
+    image: traefik:v2.11
+    network_mode: "host" #on my configuration, this was the only way to not make Nextcloud going in timeout
+    volumes:
+      # So that Traefik can listen to the Docker events
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./traefik:/etc/traefik/
+  prometheus:
+    labels:
+      - "traefik.http.routers.prometheus.rule=PathPrefix(`/prometheus`)"
+      - "traefik.http.routers.prometheus.entrypoints=private"
+      - "service-name=prometheus"
+    image: prom/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--web.external-url=http://localhost:8081/prometheus' #needed by prometheus internal redirect 
+    networks:
+      - default
+      - prom-network
+    restart: unless-stopped
+    volumes:
+      - ./prometheus:/etc/prometheus
+      - prom_data:/prometheus
+  grafana:
+    image: grafana/grafana
+    labels:
+      - "traefik.http.routers.grafana.rule=PathPrefix(`/grafana`)"
+      - "traefik.http.routers.grafana.entrypoints=private"
+      - "service-name=grafana"
+    networks:
+      - prom-network
+    restart: unless-stopped
+    environment:
+      - "GF_SECURITY_ADMIN_USER=admin"
+      - "GF_SECURITY_ADMIN_PASSWORD=grafana"
+      - "GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s:%(http_port)s/grafana/"
+      - "GF_SERVER_SERVE_FROM_SUB_PATH=true"
+    volumes:
+      - ./grafana/:/etc/grafana/provisioning/
+  nextcloud:
+    labels:
+      - "service-name=Nextcloud"
+      - "traefik.http.routers.nextcloud.rule=PathPrefix(`/`)" #in this way, if you don't know another service url, you will redirect always to NextCloud
+      - "traefik.http.routers.nextcloud.entrypoints=public,private,secure"
+    deploy:
+      replicas: 2 #this work because Nextcloud will use the same Volume, in a real env we probably need a NFS 
+    image: nextcloud:apache
+    restart: always
+    volumes:
+      - nc_data:/var/www/html #this a not a bind volume because in my environment (aka colima) I had problems with folders ownership...
+    networks:
+      - default
+      - redisnet
+      - dbnet
+      - prom-network
+    environment:
+      - REDIS_HOST=nc-redis
+      - MYSQL_HOST=nc-db
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nextcloud
+      - MYSQL_PASSWORD=nextcloud
+  nc-redis:
+    labels:
+      - "traefik.http.routers.nc-redis.entrypoints=private"
+    image: redis:alpine
+    restart: always
+    networks:
+      - redisnet
+    expose:
+      - 6379
+  nc-db:
+    labels:
+      - "traefik.http.routers.nc-db.entrypoints=private"
+    image: mariadb:10.5
+    command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
+    restart: always
+    volumes:
+      - nc-db_data:/var/lib/mysql
+    networks:
+      - dbnet
+    environment:
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nextcloud
+      - MYSQL_ROOT_PASSWORD=nextcloud
+      - MYSQL_PASSWORD=nextcloud
+    expose:
+      - 3306
+  nc-exporter:
+    labels:
+      - "traefik.http.routers.nc-exporter.entrypoints=private"
+    image: xperimental/nextcloud-exporter:0.6.2
+    networks:
+      - prom-network
+    environment:
+      - NEXTCLOUD_SERVER=http://nextcloud
+      - NEXTCLOUD_USERNAME=admin
+      - NEXTCLOUD_PASSWORD=password
+      - NEXTCLOUD_LISTEN_ADDRESS=:9205
+      - NEXTCLOUD_TLS_SKIP_VERIFY=true
+volumes:
+  database:
+    driver: local
+  redis:
+    driver: local
+  prom_data:
+  nc-db_data:
+  nc_data:
+networks:
+  dbnet:
+  redisnet:
+  prom-network:

@@ -1,0 +1,25 @@
+#command: --api.insecure=true --providers.docker=true --log.level=DEBUG --metrics.prometheus=true --entrypoints.public.address=:80 --entrypoints.private.address=:8081 
+
+providers:
+  file:
+    directory: "/etc/traefik/dynamic"
+  docker: {}
+
+api:
+  insecure: true
+
+log:
+  level: "DEBUG"
+
+metrics:
+  prometheus: {}
+
+entryPoints:
+  public:
+    address: ":80"
+  private:
+    address: ":8081"
+  secure:
+    address: ":443"
+    http:
+      tls: {}

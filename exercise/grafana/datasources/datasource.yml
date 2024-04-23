@@ -1,0 +1,9 @@
+apiVersion: 1
+
+datasources:
+- name: Prometheus
+  type: prometheus
+  url: http://192.168.106.2:8081/prometheus 
+  isDefault: true
+  access: proxy
+  editable: true
